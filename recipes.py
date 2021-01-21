@@ -3,13 +3,12 @@ from PyInquirer import style_from_dict, Token, prompt, Separator
 import click
 from pymongo import MongoClient
 import gridfs
-from bson.objectid import ObjectId
 from PIL import Image
 import io
 import os
 
 def connect_to_db():
-    cluster = MongoClient('mongodb+srv://zkwhTxLjojbghd24jSuxiLk8GXcdL3L1c:'+os.environ.get('COOKBOOK')
+    cluster = MongoClient('mongodb+srv://zkwhTxLjojbghd24jSuxiLk8GXcdL3L1c:'+str(os.environ.get('COOKBOOK'))
 +'@cookbook.5pmsh.mongodb.net/cookbook?retryWrites=true&w=majority')
     db = cluster['cookbook']
     collection = db['recipes']
@@ -21,19 +20,17 @@ def send_recipe_to_db(collection, recipe):
 def generate_recipe(db):
     title = click.prompt('Recipe Title', type=str)
     serves = click.prompt('Recipe Serves', type=IntRange(1))
-    ingredients = []
+    ingredients = {}
     stop = 1
     print('===INGREDIENTS===')
     while stop != 0:
-        ingredient = {}
         element = click.prompt('add ingredient', default="", type=str)
         if element == '':
             break
         quantity = click.prompt('add quantity (in grams)', default="", type=IntRange(1))
         if quantity == '':
             break
-        ingredient[element] = quantity
-        ingredients.append(ingredient)
+        ingredients[element] = quantity
     steps = []
     stop = 1
     counter = 1
@@ -46,20 +43,12 @@ def generate_recipe(db):
         counter+=1
         steps.append(step)
 
+    print('===IMAGE===')
     image_path = click.prompt('image recipe path')
     fs = gridfs.GridFS(db)
     fileID = fs.put(open(image_path, 'rb'))
     out = fs.get(fileID)
     image = out._id
-
-    #img = Image.open(image_path)
-    #imgByteArr = io.BytesIO()
-    #img.save(imgByteArr, format='PNG')
-    #image = imgByteArr.getvalue()
-
-    ### from bytearr to Image
-    # image = Image.open(io.BytesIO(imgByteArr))
-    # image.save('image.png')
 
     recipe = {}
     recipe['title'] = title
@@ -68,6 +57,7 @@ def generate_recipe(db):
     recipe['steps'] = steps
     recipe['image_id'] = image
     return recipe
+
 
 def main_menu():
     style = style_from_dict({
@@ -79,7 +69,7 @@ def main_menu():
     Token.Answer: '#f44336 bold',
   })
 
-    options = ['Add Recipe','Search Recipe','Exit']
+    options = ['Add Recipe','Search Recipe','List Recipes','Exit']
 
     questions = [
                 {
@@ -97,6 +87,9 @@ def main_menu():
                                   {
                                     'name': options[2]
                                   },
+                                  {
+                                    'name': options[3]
+                                  },
                               ],
                   'validate': lambda answer: 'You must choose at least one.' \
                       if len(answer) == 0 else True
@@ -105,9 +98,14 @@ def main_menu():
     answers = prompt(questions, style=style)
     return answers, options
 
-def search_recipe(collection, db):
-    nombre = input('buscar receta: ')
-    recipe = collection.find_one({'title':nombre})
+
+def search_recipe(collection, db, title):
+    if title is None:
+        title = click.prompt('buscar receta: ', type=str)
+    recipe = collection.find_one({'title': title})
+    if recipe is None:
+        print('Thats not a valid recipe title')
+        return
     image_id = recipe['image_id']
     chunks_collection = db['fs.chunks']
     binaries = chunks_collection.find({'files_id':image_id})
@@ -119,16 +117,55 @@ def search_recipe(collection, db):
             break
     image_byn = b''.join(image_byn)
     image = Image.open(io.BytesIO(image_byn))
-    image.save('image.png')
-    print(recipe)
+    serves = click.prompt('How many serves?', type=IntRange(1), default=recipe['serves'])
+    show_recipe(recipe, image, serves)
 
+
+def list_recipes(collection):
+    recipe_titles = []
+    recipes = collection.find()
+    while True:
+        try:
+            recipe_titles.append(recipes.next()['title'])
+        except:
+            break
+    questions = [
+    {
+        'type': 'list',
+        'name': 'title',
+        'message': 'Recipes from Cookbook',
+        'choices': sorted(recipe_titles)
+    },
+    ]
+    answers = prompt(questions)['title']
+    return answers
+
+
+def show_recipe(recipe, image, serves):
+    image_name = recipe['title'].lower().replace(' ', '_')
+    image.save(f'{image_name}.png')
+    print(f"\n{recipe['title']}")
+    print(f"\nServes: {recipe['serves']}")
+    print(f"\nIngredients:")
+    for ingredient, quantity in recipe['ingredients'].items():
+        quantity = int(serves*quantity/recipe['serves'])
+        print('-', ingredient, quantity, 'gr.')
+    print(f"\nSteps:")
+    for step in recipe['steps']:
+        print(step)
+    image_path = f'{os.getcwd()}/{image_name}'
+    print(f'\nLook the image for the recipe located at {image_path}')
 
 if __name__ == "__main__":
     db, collection = connect_to_db()
     answers, options = main_menu()
+    recipe = None
     if answers['option'] == options[1]:
-        search_recipe(collection, db)
+        search_recipe(collection, db, recipe)
     elif answers['option'] == options[2]:
+        recipe = list_recipes(collection)
+        search_recipe(collection, db, recipe)
+    elif answers['option'] == options[3]:
         exit()
     elif answers['option'] == options[0]:
         recipe = generate_recipe(db)
