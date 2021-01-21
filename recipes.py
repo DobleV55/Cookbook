@@ -27,19 +27,23 @@ def generate_recipe(db):
         element = click.prompt('add ingredient', default="", type=str)
         if element == '':
             break
-        quantity = click.prompt('add quantity (in grams)', default="", type=IntRange(1))
-        if quantity == '':
+        quantity = click.prompt('add quantity (in grams)', default="", type=IntRange(0))
+        if quantity == 0:
+            ingredients[element] = quantity
+            pass
+        elif quantity == '':
             break
-        measures = [
-        {
-        'type': 'list',
-        'name': 'measurement',
-        'message': 'grams or units?',
-        'choices': ['grams','units'],
-        },]
-        measurement = prompt(measures)['measurement']
-        quantity = f'{quantity} {measurement}'
-        ingredients[element] = quantity
+        else:
+            measures = [
+            {
+            'type': 'list',
+            'name': 'measurement',
+            'message': 'grams or units?',
+            'choices': ['grams','units','cups'],
+            },]
+            measurement = prompt(measures)['measurement']
+            quantity = f'{quantity} {measurement}'
+            ingredients[element] = quantity
     steps = []
     stop = 1
     counter = 1
@@ -119,22 +123,26 @@ def search_recipe(collection, db, title):
     if title is None:
         title = click.prompt('buscar receta: ', type=str)
     recipe = collection.find_one({'title': title})
+    image_id = recipe['image_id']
     if recipe is None:
         print('Thats not a valid recipe title')
         return
-    image_id = recipe['image_id']
-    chunks_collection = db['fs.chunks']
-    binaries = chunks_collection.find({'files_id':image_id})
-    image_byn = []
-    while True:
-        try:
-            image_byn.append(binaries.next()['data'])
-        except:
-            break
-    image_byn = b''.join(image_byn)
-    image = Image.open(io.BytesIO(image_byn))
-    serves = click.prompt('How many serves?', type=IntRange(1), default=recipe['serves'])
-    show_recipe(recipe, image, serves)
+    if image_id is None:
+        serves = click.prompt('How many serves?', type=IntRange(1), default=recipe['serves'])
+        show_recipe(recipe, image_id, serves)
+    else:    
+        chunks_collection = db['fs.chunks']
+        binaries = chunks_collection.find({'files_id':image_id})
+        image_byn = []
+        while True:
+            try:
+                image_byn.append(binaries.next()['data'])
+            except:
+                break
+        image_byn = b''.join(image_byn)
+        image = Image.open(io.BytesIO(image_byn))
+        serves = click.prompt('How many serves?', type=IntRange(1), default=recipe['serves'])
+        show_recipe(recipe, image, serves)
 
 
 def list_recipes(collection):
@@ -158,19 +166,30 @@ def list_recipes(collection):
 
 
 def show_recipe(recipe, image, serves):
-    image_name = recipe['title'].lower().replace(' ', '_')
-    image.save(f'{image_name}.png')
     print(f"\n{recipe['title']}")
-    print(f"\nServes: {recipe['serves']}")
+    print(f"\nServes: {serves}")
     print(f"\nIngredients:")
     for ingredient, quantity in recipe['ingredients'].items():
-        qua = serves*int(quantity.split(' ')[0])/recipe['serves']
-        print('-', ingredient, int(qua), quantity.split(' ')[1])
+        if type(quantity) is int:
+            print('-', ingredient)
+        else:
+            qua = quantity.split(' ')[0]
+            qua = serves*int(qua)/recipe['serves']
+            measurement = quantity.split(' ')[1]
+            if int(qua) == 0:
+                print('-', qua, measurement, ingredient)
+            else:
+                print('-', int(qua), measurement, ingredient)
     print(f"\nSteps:")
     for step in recipe['steps']:
         print(step)
-    image_path = f'{os.getcwd()}/{image_name}'
-    print(f'\nLook the image for the recipe located at {image_path}')
+    if image is None:
+        print('\nNo image for this Recipe!')
+    else:
+        image_name = recipe['title'].lower().replace(' ', '_')
+        image.save(f'{image_name}.png')
+        image_path = f'{os.getcwd()}/{image_name}'
+        print(f'\nLook the image for the recipe located at {image_path}')
 
 if __name__ == "__main__":
     db, collection = connect_to_db()
