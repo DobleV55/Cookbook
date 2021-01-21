@@ -30,6 +30,15 @@ def generate_recipe(db):
         quantity = click.prompt('add quantity (in grams)', default="", type=IntRange(1))
         if quantity == '':
             break
+        measures = [
+        {
+        'type': 'list',
+        'name': 'measurement',
+        'message': 'grams or units?',
+        'choices': ['grams','units'],
+        },]
+        measurement = prompt(measures)['measurement']
+        quantity = f'{quantity} {measurement}'
         ingredients[element] = quantity
     steps = []
     stop = 1
@@ -46,9 +55,13 @@ def generate_recipe(db):
     print('===IMAGE===')
     image_path = click.prompt('image recipe path')
     fs = gridfs.GridFS(db)
-    fileID = fs.put(open(image_path, 'rb'))
-    out = fs.get(fileID)
-    image = out._id
+    image = None
+    try:
+        fileID = fs.put(open(image_path, 'rb'))
+        out = fs.get(fileID)
+        image = out._id
+    except:
+        print('no image with that name, recipe has been uploaded without image')
 
     recipe = {}
     recipe['title'] = title
@@ -69,8 +82,7 @@ def main_menu():
     Token.Answer: '#f44336 bold',
   })
 
-    options = ['Add Recipe','Search Recipe','List Recipes','Exit']
-
+    options = ['Add Recipe','Search Recipe','List Recipes','Edit Recipe','Exit']
     questions = [
                 {
                   'type': 'list',
@@ -88,8 +100,12 @@ def main_menu():
                                     'name': options[2]
                                   },
                                   {
-                                    'name': options[3]
+                                    'name': options[3],
+                                    'disabled': 'Unavailable at this time'
                                   },
+                                  {
+                                    'name': options[4]
+                                  }
                               ],
                   'validate': lambda answer: 'You must choose at least one.' \
                       if len(answer) == 0 else True
@@ -148,8 +164,8 @@ def show_recipe(recipe, image, serves):
     print(f"\nServes: {recipe['serves']}")
     print(f"\nIngredients:")
     for ingredient, quantity in recipe['ingredients'].items():
-        quantity = int(serves*quantity/recipe['serves'])
-        print('-', ingredient, quantity, 'gr.')
+        qua = serves*int(quantity.split(' ')[0])/recipe['serves']
+        print('-', ingredient, int(qua), quantity.split(' ')[1])
     print(f"\nSteps:")
     for step in recipe['steps']:
         print(step)
@@ -165,7 +181,7 @@ if __name__ == "__main__":
     elif answers['option'] == options[2]:
         recipe = list_recipes(collection)
         search_recipe(collection, db, recipe)
-    elif answers['option'] == options[3]:
+    elif answers['option'] == options[4]:
         exit()
     elif answers['option'] == options[0]:
         recipe = generate_recipe(db)
